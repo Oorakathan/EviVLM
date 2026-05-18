@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────
+# EviVLM — requirements.txt
+# System: Windows, i5-13500H, 16GB RAM, No GPU (CPU only)
+# ─────────────────────────────────────────────────────────────
+#
+# INSTALL ORDER (run these 2 commands in order):
+#
+#   1) PyTorch CPU-only first (separate command — do NOT use requirements.txt for this):
+#      pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#
+#   2) Everything else:
+#      pip install -r requirements.txt
+#
+# ─────────────────────────────────────────────────────────────
+
+# ── Transformers / BERT ───────────────────────────────────────
+# med.py uses transformers.file_utils and modeling_utils
+# Tested working: any version from 4.26 up to latest (5.x)
+transformers>=4.26.0
+
+# ── Medical image reading ─────────────────────────────────────
+# Reads your .nii files (.nii IS NIfTI format)
+nibabel>=3.2.0
+
+# ── Image processing ──────────────────────────────────────────
+Pillow>=9.0.0
+opencv-python>=4.6.0
+scipy>=1.9.0
+
+# ── Data handling ─────────────────────────────────────────────
+numpy>=1.23.0
+pandas>=1.5.0
+openpyxl>=3.0.10
+
+# ── ML utilities ──────────────────────────────────────────────
+scikit-learn>=1.1.0
+timm>=0.9.0
+
+# ── HuggingFace model download ────────────────────────────────
+huggingface_hub>=0.16.0
+
+# ─────────────────────────────────────────────────────────────
+# NOT included (not needed by our 3 scripts):
+#   tensorboardX  — only needed if you want tensorboard graphs
+#   thop          — FLOPs counter, only in original train.py
+#   fairscale     — only in vits.py (image encoder we don't use)
+#   ml_collections— only in CTrans config (we don't use)
+# ─────────────────────────────────────────────────────────────
