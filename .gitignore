@@ -1,1 +1,5 @@
 *.bin
+/datasets
+/MosMedData Chest CT Scans with COVID-19 Related Findings COVID19_1110 1.0
+/__pycache__
+/runs

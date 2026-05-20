@@ -19,7 +19,7 @@ import random
 from pathlib import Path
 
 BASE_DIR   = Path(__file__).parent
-ARCHIVE    = BASE_DIR / "archive" / "MosMedData Chest CT Scans with COVID-19 Related Findings COVID19_1110 1.0"
+ARCHIVE    = BASE_DIR / "MosMedData Chest CT Scans with COVID-19 Related Findings COVID19_1110 1.0"
 MASK_DIR   = ARCHIVE / "masks"
 STUDY_DIRS = {
     "CT-0": ARCHIVE / "studies" / "CT-0",

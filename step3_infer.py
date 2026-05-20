@@ -177,7 +177,7 @@ def infer_single(model, img_path, text):
 
     mask = postprocess_mask(prob_VL.cpu())
     unc  = uncertainty_map(evi_V.cpu(), evi_L.cpu(), B=1)
-    dice_raw = prob_VL.squeeze().numpy()   # raw probability map
+    dice_raw = prob_VL.squeeze().cpu().numpy()   # raw probability map
 
     return mask, unc, dice_raw
 
