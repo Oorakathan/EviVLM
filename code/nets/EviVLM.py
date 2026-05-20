@@ -168,7 +168,8 @@ class EviVLM(nn.Module):
         x2 = self.down1(x1)
         x3 = self.down2(x2)
         x4 = self.down3(x3)
-        x5 = self.down4(x4)  # [b, 512, 14, 14]
+        x5 = self.down4(x4)
+        patch_h, patch_w = x5.shape[-2:]
 
         report_feat, word_feat, _, sents = self.text_encoder(texts, self.device)
         report_emb = self.text_encoder.global_embed(report_feat)
@@ -188,7 +189,7 @@ class EviVLM(nn.Module):
         atten_sim[mask.unsqueeze(1).repeat(1, patch_num, 1)] = float("-inf")  # [b, 196, 9]
         atten_scores = F.softmax(atten_sim / self.temperature, dim=-1)  # [b, 196, 9]
         patch_emb_atten = torch.bmm(atten_scores, word_emb)  # [b, 196, 512]
-        x5_2 = patch_emb_atten.permute(0, 2, 1).view(b, 512, 14, 14)  # [b, 512, 14, 14]
+        x5_2 = patch_emb_atten.permute(0, 2, 1).view(b, 512, patch_h, patch_w)
         x5_2_nonlocal = self.text_nonlocal(x5_2)  # [b, 196, 196]
 
         # affinity matrix
@@ -201,8 +202,8 @@ class EviVLM(nn.Module):
 
         refined_x5 = torch.matmul(cross_aff, patch_emb)  # [b, 196, 512]
         refined_x5_2 = torch.matmul(cross_aff, patch_emb_atten)  # [b, 196, 512]
-        refined_x5_affinity = refined_x5.permute(0, 2, 1).view(b, 512, 14, 14)  # [b, 512, 14, 14]
-        refined_x5_2_affinity = refined_x5_2.permute(0, 2, 1).view(b, 512, 14, 14)  # [b, 512, 14, 14]
+        refined_x5_affinity = refined_x5.permute(0, 2, 1).view(b, 512, patch_h, patch_w)
+        refined_x5_2_affinity = refined_x5_2.permute(0, 2, 1).view(b, 512, patch_h, patch_w)
         x5 = x5 * refined_x5_2_affinity
         x5_2 = x5_2 * refined_x5_2_affinity
 
@@ -225,7 +226,8 @@ class EviVLM(nn.Module):
         # alpha_V_64 = F.normalize(alpha_V_64, dim=-1)
 
         alpha_V_2 = self.prob_alpha_2(x_V)  # [b, 64, 224, 224]-->[b, 2, 224, 224]
-        alpha_V_2 = alpha_V_2.permute(0, 2, 3, 1).reshape(b*224*224, 2)
+        out_h, out_w = alpha_V_2.shape[-2:]
+        alpha_V_2 = alpha_V_2.permute(0, 2, 3, 1).reshape(b * out_h * out_w, 2)
         alpha_V_2 = nn.Softplus()(alpha_V_2)  # [n, 2]
         ##################################################################################################################
         # alpha_L = self.prob_alpha(x_L)  # [b, 64, 224, 224]-->[b, 1, 224, 224]
@@ -239,7 +241,7 @@ class EviVLM(nn.Module):
         # beta_L_64 = F.normalize(beta_L_64, dim=-1)
 
         beta_L_2 = self.prob_alpha_2(x_L)  # [b, 64, 224, 224]-->[b, 2, 224, 224]
-        beta_L_2 = beta_L_2.permute(0, 2, 3, 1).reshape(b*224*224, 2)
+        beta_L_2 = beta_L_2.permute(0, 2, 3, 1).reshape(b * out_h * out_w, 2)
         beta_L_2 = nn.Softplus()(beta_L_2)  # [n, 2]
         ##################################################################################################################
 
@@ -262,13 +264,13 @@ class EviVLM(nn.Module):
         ##################################################################################################################
         S_V = torch.sum(alpha_V_2, dim=1)
         un_V = 2 / S_V
-        un_V = un_V.view(-1, 224*224)
+        un_V = un_V.view(-1, out_h * out_w)
         un_V = torch.mean(un_V, dim=1)
         un_V = torch.sigmoid(un_V)
 
         S_L = torch.sum(beta_L_2, dim=1)
         un_L = 2 / S_L
-        un_L = un_L.view(-1, 224 * 224)
+        un_L = un_L.view(-1, out_h * out_w)
         un_L = torch.mean(un_L, dim=1)
         un_L = torch.sigmoid(un_L)
         #-----------------------------------------------------------------------------------------------------------------
