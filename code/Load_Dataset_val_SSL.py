@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms as T
 from torchvision.transforms import functional as F
 from typing import Callable
+import pandas as pd
 import os
 import cv2
 from scipy import ndimage
@@ -131,7 +132,9 @@ class ImageToImage2D(Dataset):
 
     def __init__(self, dataset_path: str, task_name: str, joint_transform: Callable = None,
                  one_hot_mask: int = False,
-                 image_size: int = 224) -> None:
+                 image_size: int = 224, report_excel: str = None,
+                 report_sheet: str | int = 0, report_col_image: str = "image",
+                 report_col_text: str = "report") -> None:
         self.dataset_path = dataset_path
         self.image_size = image_size
         self.input_path = os.path.join(dataset_path, 'img_labeled')
@@ -151,6 +154,26 @@ class ImageToImage2D(Dataset):
         else:
             to_tensor = T.ToTensor()
             self.joint_transform = lambda x, y: (to_tensor(x), to_tensor(y))
+
+        # Optional: load mapping from image filename to report text from Excel
+        self.report_map = {}
+        if report_excel is not None:
+            try:
+                df = pd.read_excel(report_excel, sheet_name=report_sheet)
+                # Expect columns with names matching report_col_image and report_col_text
+                if report_col_image in df.columns and report_col_text in df.columns:
+                    for _, row in df.iterrows():
+                        key = str(row[report_col_image]).strip()
+                        self.report_map[key] = str(row[report_col_text]) if not pd.isna(row[report_col_text]) else ""
+                else:
+                    # try common alternatives
+                    cols = df.columns.tolist()
+                    if len(cols) >= 2:
+                        for _, row in df.iterrows():
+                            key = str(row[cols[0]]).strip()
+                            self.report_map[key] = str(row[cols[1]]) if not pd.isna(row[cols[1]]) else ""
+            except Exception:
+                self.report_map = {}
 
     def __len__(self):
         return len(os.listdir(self.input_path))
@@ -187,19 +210,28 @@ class ImageToImage2D(Dataset):
             assert self.one_hot_mask > 0, 'one_hot_mask must be nonnegative'
             mask = torch.zeros((self.one_hot_mask, mask.shape[1], mask.shape[2])).scatter_(0, mask.long(), 1)
 
-        sample = {'image': image, 'label': mask, 'image_unlabeled': image_unlabeled}  # image[224, 224, 3], mask[224, 224, 1], text[10, 768]
+        sample = {'image': image, 'label': mask, 'image_unlabeled': image_unlabeled}
+
+        # attach optional report text if available
+        img_basename = os.path.basename(image_filename_unlabeled)
+        if img_basename in self.report_map:
+            sample['text'] = self.report_map[img_basename]
+        else:
+            sample['text'] = ""
 
         if self.joint_transform:
             sample = self.joint_transform(sample)
 
-        return sample, mask_filename_unlabeled  # {'image': image, 'label': mask, 'text': text}, image_filename
+        return sample, mask_filename_unlabeled
 
 
 class ImageToImage2D_val(Dataset):
 
     def __init__(self, dataset_path: str, task_name: str, joint_transform: Callable = None,
                  one_hot_mask: int = False,
-                 image_size: int = 224) -> None:
+                 image_size: int = 224, report_excel: str = None,
+                 report_sheet: str | int = 0, report_col_image: str = "image",
+                 report_col_text: str = "report") -> None:
         self.dataset_path = dataset_path
         self.image_size = image_size
         self.input_path = os.path.join(dataset_path, 'img')
@@ -215,6 +247,24 @@ class ImageToImage2D_val(Dataset):
         else:
             to_tensor = T.ToTensor()
             self.joint_transform = lambda x, y: (to_tensor(x), to_tensor(y))
+
+        # Optional: load mapping from image filename to report text from Excel
+        self.report_map = {}
+        if report_excel is not None:
+            try:
+                df = pd.read_excel(report_excel, sheet_name=report_sheet)
+                if report_col_image in df.columns and report_col_text in df.columns:
+                    for _, row in df.iterrows():
+                        key = str(row[report_col_image]).strip()
+                        self.report_map[key] = str(row[report_col_text]) if not pd.isna(row[report_col_text]) else ""
+                else:
+                    cols = df.columns.tolist()
+                    if len(cols) >= 2:
+                        for _, row in df.iterrows():
+                            key = str(row[cols[0]]).strip()
+                            self.report_map[key] = str(row[cols[1]]) if not pd.isna(row[cols[1]]) else ""
+            except Exception:
+                self.report_map = {}
 
     def __len__(self):
         return len(os.listdir(self.input_path))
@@ -243,9 +293,16 @@ class ImageToImage2D_val(Dataset):
             assert self.one_hot_mask > 0, 'one_hot_mask must be nonnegative'
             mask = torch.zeros((self.one_hot_mask, mask.shape[1], mask.shape[2])).scatter_(0, mask.long(), 1)
 
-        sample = {'image': image, 'label': mask}  # image[224, 224, 3], mask[224, 224, 1], text[10, 768]
+        sample = {'image': image, 'label': mask}
+
+        # attach optional report text if available
+        img_basename = os.path.basename(image_filename)
+        if img_basename in self.report_map:
+            sample['text'] = self.report_map[img_basename]
+        else:
+            sample['text'] = ""
 
         if self.joint_transform:
             sample = self.joint_transform(sample)
 
-        return sample, mask_filename  # {'image': image, 'label': mask, 'text': text}, image_filename
+        return sample, mask_filename

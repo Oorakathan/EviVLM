@@ -1,22 +1,23 @@
 # -*- coding: utf-8 -*-
 import os
-import torch
 import time
+
 import ml_collections
+import torch
 
 ## PARAMETERS OF THE MODEL
 save_model = True
 tensorboard = True
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-device = 'cuda:0'
+device = "cuda:0"
 # use_cuda = torch.cuda.is_available()
 seed = 666
-os.environ['PYTHONHASHSEED'] = str(seed)
+os.environ["PYTHONHASHSEED"] = str(seed)
 
 cosineLR = True  # Use cosineLR or not
 n_channels = 3
 n_labels = 1  # MoNuSeg & Covid19
-epochs = 1000
+epochs = 50
 img_size = 224
 print_frequency = 1
 save_frequency = 5000
@@ -28,25 +29,27 @@ tcl_w = 0.1
 tv_w = 0.1
 
 pretrain = False
-task_name = 'Covid19_SSL'
-# task_name = 'MoNuSeg' 
+task_name = "Covid19_SSL"
+# task_name = 'MoNuSeg'
 # task_name = 'spine'
 # task_name = 'Bone'
 learning_rate = 3e-5  # MoNuSeg: 1e-3, Covid19: 3e-4
-batch_size = 32  # For LViT-T, 2 is better than 4
-batch_size_val = 32
+batch_size = 4  # Adjusted for GTX 1650 (4GB VRAM), 4 is usually safe for 224x224
+batch_size_val = 4
 
-model_name = 'LViT'
+model_name = "LViT"
 # model_name = 'LViT_pretrain'
 
-train_dataset = '/root/data1/lvit_semi_novel/datasets/Covid19/Train_Folder/'
-val_dataset = '/root/data1/lvit_semi_novel/datasets/Covid19/Val_Folder/'
-session_name = 'Test_session' + '_' + time.strftime('%m.%d_%Hh%M')
-save_path = task_name + '/' + model_name + '/' + session_name + '/'
-model_path = save_path + 'models/'
-tensorboard_folder = save_path + 'tensorboard_logs/'
-logger_path = save_path + session_name + ".log"   # 'MoNuSeg/LViT/Test_session_time/Test_session_time.log'
-visualize_path = save_path + 'visualize_val/'
+train_dataset = "D:/VLM_Medical_Imaging/dataset/Train_Folder/"
+val_dataset = "D:/VLM_Medical_Imaging/dataset/Val_Folder/"
+session_name = "Test_session" + "_" + time.strftime("%m.%d_%Hh%M")
+save_path = task_name + "/" + model_name + "/" + session_name + "/"
+model_path = save_path + "models/"
+tensorboard_folder = save_path + "tensorboard_logs/"
+logger_path = (
+    save_path + session_name + ".log"
+)  # 'MoNuSeg/LViT/Test_session_time/Test_session_time.log'
+visualize_path = save_path + "visualize_val/"
 
 
 ##########################################################################

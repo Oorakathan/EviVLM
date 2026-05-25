@@ -1,23 +1,22 @@
+import math
+import warnings
+import weakref
+from functools import wraps
+
+import cv2
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.metrics import roc_auc_score, jaccard_score
-import cv2
-from torch import nn
 import torch.nn.functional as F
-import math
-from functools import wraps
-import warnings
-import weakref
-from PIL import Image
 from numpy import average, dot, linalg
-
+from PIL import Image
+from sklearn.metrics import jaccard_score, roc_auc_score
+from torch import nn
 from torch.autograd import Variable
 from torch.optim.optimizer import Optimizer
 
 
 class WeightedBCE(nn.Module):
-
     def __init__(self, weights=[0.4, 0.6]):
         super(WeightedBCE, self).__init__()
         self.weights = weights
@@ -26,13 +25,16 @@ class WeightedBCE(nn.Module):
         # print("====",logit_pixel.size())
         logit = logit_pixel.view(-1)
         truth = truth_pixel.view(-1)
-        assert (logit.shape == truth.shape)
-        loss = F.binary_cross_entropy(logit, truth, reduction='none')
+        assert logit.shape == truth.shape
+        loss = F.binary_cross_entropy(logit, truth, reduction="none")
         pos = (truth > 0.5).float()
         neg = (truth < 0.5).float()
         pos_weight = pos.sum().item() + 1e-12
         neg_weight = neg.sum().item() + 1e-12
-        loss = (self.weights[0] * pos * loss / pos_weight + self.weights[1] * neg * loss / neg_weight).sum()
+        loss = (
+            self.weights[0] * pos * loss / pos_weight
+            + self.weights[1] * neg * loss / neg_weight
+        ).sum()
 
         return loss
 
@@ -46,7 +48,7 @@ class WeightedDiceLoss(nn.Module):
         batch_size = len(logit)
         logit = logit.view(batch_size, -1)
         truth = truth.view(batch_size, -1)
-        assert (logit.shape == truth.shape)
+        assert logit.shape == truth.shape
         p = logit.view(batch_size, -1)
         t = truth.view(batch_size, -1)
         w = truth.detach()  # 阻断梯度传播--梯度为False
@@ -71,7 +73,9 @@ class BinaryDiceLoss(nn.Module):
         input_flat = inputs.view(N, -1)
         targets_flat = targets.view(N, -1)
         intersection = input_flat + targets_flat
-        N_dice_eff = (2 * intersection.sum(1) + smooth) / (input_flat.sum(1) + targets_flat.sum(1) + smooth)
+        N_dice_eff = (2 * intersection.sum(1) + smooth) / (
+            input_flat.sum(1) + targets_flat.sum(1) + smooth
+        )
         loss = 1 - N_dice_eff.sum() / N
         return loss
 
@@ -124,7 +128,7 @@ class DiceLoss(nn.Module):
         target = self._one_hot_encoder(target)
         if weight is None:
             weight = [1] * self.n_classes
-        assert inputs.size() == target.size(), 'predict & target shape do not match'
+        assert inputs.size() == target.size(), "predict & target shape do not match"
         class_wise_dice = []
         loss = 0.0
         dice1 = self._dice_loss(inputs[:, 1], target[:, 1]) * weight[1]
@@ -195,11 +199,14 @@ class WeightedDiceBCE(nn.Module):
         self.dice_weight = dice_weight
 
     def _show_dice(self, inputs, targets):
-        inputs[inputs >= 0.5] = 1
-        inputs[inputs < 0.5] = 0
-        targets[targets > 0] = 1
-        targets[targets <= 0] = 0
-        hard_dice_coeff = 1.0 - self.dice_loss(inputs, targets)
+        # Create a copy to avoid in-place modification of the original predictions
+        inputs_copy = inputs.clone()
+        inputs_copy[inputs_copy >= 0.5] = 1
+        inputs_copy[inputs_copy < 0.5] = 0
+        targets_copy = targets.clone()
+        targets_copy[targets_copy > 0] = 1
+        targets_copy[targets_copy <= 0] = 0
+        hard_dice_coeff = 1.0 - self.dice_loss(inputs_copy, targets_copy)
         return hard_dice_coeff
 
     def forward(self, inputs, targets):
@@ -211,29 +218,33 @@ class WeightedDiceBCE(nn.Module):
 
 
 def auc_on_batch(masks, pred):
-    '''Computes the mean Area Under ROC Curve over a batch during training'''
+    """Computes the mean Area Under ROC Curve over a batch during training"""
     aucs = []
-    for i in range(pred.shape[1]):
+    for i in range(pred.shape[0]):  # Changed from pred.shape[1] to pred.shape[0]
         prediction = pred[i][0].cpu().detach().numpy()
-        # print("www",np.max(prediction), np.min(prediction))
         mask = masks[i].cpu().detach().numpy()
-        # print("rrr",np.max(mask), np.min(mask))
         aucs.append(roc_auc_score(mask.reshape(-1), prediction.reshape(-1)))
     return np.mean(aucs)
 
 
 def iou_on_batch(masks, pred):  # ([b, 1, 224, 224], [b, 1, 224, 224])
-    '''Computes the mean Area Under ROC Curve over a batch during training'''
-
+    """Computes the mean Jaccard Score over a batch during training"""
+    ious = []
     for i in range(pred.shape[0]):
         pred_tmp = pred[i][0].cpu().detach().numpy()  # [224, 224]
-        mask_tmp = masks[i].cpu().detach().numpy()  # [1, 224, 224]
+        mask_tmp = masks[i].cpu().detach().numpy()  # [224, 224]
+
+        # Handle potential NaNs before they reach sklearn
+        if np.isnan(pred_tmp).any():
+            ious.append(0.0)
+            continue
+
         pred_tmp[pred_tmp >= 0.5] = 1
         pred_tmp[pred_tmp < 0.5] = 0
         mask_tmp[mask_tmp > 0] = 1
         mask_tmp[mask_tmp <= 0] = 0
-        iou = jaccard_score(mask_tmp.reshape(-1), pred_tmp.reshape(-1))  # 展成1维 ([50176,], [50176,])
-    return iou
+        ious.append(jaccard_score(mask_tmp.reshape(-1), pred_tmp.reshape(-1)))
+    return np.mean(ious)
 
 
 def dice_coef(y_true, y_pred):
@@ -241,11 +252,13 @@ def dice_coef(y_true, y_pred):
     y_true_f = y_true.flatten()
     y_pred_f = y_pred.flatten()
     intersection = np.sum(y_true_f * y_pred_f)
-    return (2. * intersection + smooth) / (np.sum(y_true_f) + np.sum(y_pred_f) + smooth)
+    return (2.0 * intersection + smooth) / (
+        np.sum(y_true_f) + np.sum(y_pred_f) + smooth
+    )
 
 
 def dice_on_batch(masks, pred):
-    '''Computes the mean Area Under ROC Curve over a batch during training'''
+    """Computes the mean Area Under ROC Curve over a batch during training"""
     dices = []
 
     for i in range(pred.shape[0]):
@@ -260,7 +273,7 @@ def dice_on_batch(masks, pred):
 
 
 def save_on_batch(images1, masks, pred, names, vis_path):
-    '''Computes the mean Area Under ROC Curve over a batch during training'''
+    """Computes the mean Area Under ROC Curve over a batch during training"""
     for i in range(pred.shape[0]):
         pred_tmp = pred[i][0].cpu().detach().numpy()
         mask_tmp = masks[i].cpu().detach().numpy()
@@ -274,32 +287,34 @@ def save_on_batch(images1, masks, pred, names, vis_path):
 
 
 class _LRScheduler(object):
-
     def __init__(self, optimizer, last_epoch=-1):
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
-            raise TypeError('{} is not an Optimizer'.format(
-                type(optimizer).__name__))
+            raise TypeError("{} is not an Optimizer".format(type(optimizer).__name__))
         self.optimizer = optimizer
 
         # Initialize epoch and base learning rates
         if last_epoch == -1:
             for group in optimizer.param_groups:
-                group.setdefault('initial_lr', group['lr'])
+                group.setdefault("initial_lr", group["lr"])
         else:
             for i, group in enumerate(optimizer.param_groups):
-                if 'initial_lr' not in group:
-                    raise KeyError("param 'initial_lr' is not specified "
-                                   "in param_groups[{}] when resuming an optimizer".format(i))
-        self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
+                if "initial_lr" not in group:
+                    raise KeyError(
+                        "param 'initial_lr' is not specified "
+                        "in param_groups[{}] when resuming an optimizer".format(i)
+                    )
+        self.base_lrs = list(
+            map(lambda group: group["initial_lr"], optimizer.param_groups)
+        )
         self.last_epoch = last_epoch
 
         # Following https://github.com/pytorch/pytorch/issues/20124
         # We would like to ensure that `lr_scheduler.step()` is called after
         # `optimizer.step()`
         def with_counter(method):
-            if getattr(method, '_with_counter', False):
+            if getattr(method, "_with_counter", False):
                 # `optimizer.step()` has already been replaced, return.
                 return method
 
@@ -335,7 +350,9 @@ class _LRScheduler(object):
         It contains an entry for every variable in self.__dict__ which
         is not the optimizer.
         """
-        return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
+        return {
+            key: value for key, value in self.__dict__.items() if key != "optimizer"
+        }
 
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
@@ -347,8 +364,7 @@ class _LRScheduler(object):
         self.__dict__.update(state_dict)
 
     def get_last_lr(self):
-        """ Return last computed learning rate by current scheduler.
-        """
+        """Return last computed learning rate by current scheduler."""
         return self._last_lr
 
     def get_lr(self):
@@ -360,23 +376,28 @@ class _LRScheduler(object):
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
             if not hasattr(self.optimizer.step, "_with_counter"):
-                warnings.warn("Seems like `optimizer.step()` has been overridden after learning rate scheduler "
-                              "initialization. Please, make sure to call `optimizer.step()` before "
-                              "`lr_scheduler.step()`. See more details at "
-                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
+                warnings.warn(
+                    "Seems like `optimizer.step()` has been overridden after learning rate scheduler "
+                    "initialization. Please, make sure to call `optimizer.step()` before "
+                    "`lr_scheduler.step()`. See more details at "
+                    "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate",
+                    UserWarning,
+                )
 
             # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
             elif self.optimizer._step_count < 1:
-                warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
-                              "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
-                              "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
-                              "will result in PyTorch skipping the first value of the learning rate schedule. "
-                              "See more details at "
-                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
+                warnings.warn(
+                    "Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
+                    "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
+                    "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
+                    "will result in PyTorch skipping the first value of the learning rate schedule. "
+                    "See more details at "
+                    "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate",
+                    UserWarning,
+                )
         self._step_count += 1
 
         class _enable_get_lr_call:
-
             def __init__(self, o):
                 self.o = o
 
@@ -400,9 +421,9 @@ class _LRScheduler(object):
                     values = self.get_lr()
 
         for param_group, lr in zip(self.optimizer.param_groups, values):
-            param_group['lr'] = lr
+            param_group["lr"] = lr
 
-        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+        self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 
 
 class CosineAnnealingWarmRestarts(_LRScheduler):
@@ -448,11 +469,19 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
 
     def get_lr(self):
         if not self._get_lr_called_within_step:
-            warnings.warn("To get the last learning rate computed by the scheduler, "
-                          "please use `get_last_lr()`.", DeprecationWarning)
+            warnings.warn(
+                "To get the last learning rate computed by the scheduler, "
+                "please use `get_last_lr()`.",
+                DeprecationWarning,
+            )
 
-        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
-                for base_lr in self.base_lrs]
+        return [
+            self.eta_min
+            + (base_lr - self.eta_min)
+            * (1 + math.cos(math.pi * self.T_cur / self.T_i))
+            / 2
+            for base_lr in self.base_lrs
+        ]
 
     def step(self, epoch=None):
         """Step could be called after every batch update
@@ -491,13 +520,21 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
                 self.T_i = self.T_i * self.T_mult
         else:
             if epoch < 0:
-                raise ValueError("Expected non-negative epoch, but got {}".format(epoch))
+                raise ValueError(
+                    "Expected non-negative epoch, but got {}".format(epoch)
+                )
             if epoch >= self.T_0:
                 if self.T_mult == 1:
                     self.T_cur = epoch % self.T_0
                 else:
-                    n = int(math.log((epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult))
-                    self.T_cur = epoch - self.T_0 * (self.T_mult ** n - 1) / (self.T_mult - 1)
+                    n = int(
+                        math.log(
+                            (epoch / self.T_0 * (self.T_mult - 1) + 1), self.T_mult
+                        )
+                    )
+                    self.T_cur = epoch - self.T_0 * (self.T_mult**n - 1) / (
+                        self.T_mult - 1
+                    )
                     self.T_i = self.T_0 * self.T_mult ** (n)
             else:
                 self.T_i = self.T_0
@@ -505,7 +542,6 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         self.last_epoch = math.floor(epoch)
 
         class _enable_get_lr_call:
-
             def __init__(self, o):
                 self.o = o
 
@@ -519,9 +555,9 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
 
         with _enable_get_lr_call(self):
             for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
-                param_group['lr'] = lr
+                param_group["lr"] = lr
 
-        self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
+        self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 
 
 def read_text(filename):
@@ -530,7 +566,7 @@ def read_text(filename):
     for i in df.index.values:  # Gets the index of the row number and traverses it
         count = len(df.Description[i].split())
         if count < 9:
-            df.Description[i] = df.Description[i] + ' EOF XXX' * (9 - count)
+            df.Description[i] = df.Description[i] + " EOF XXX" * (9 - count)
         text[df.Image[i]] = df.Description[i]
     return text  # return dict (key: values)
 
@@ -541,7 +577,9 @@ def read_text_LV(filename):
     for i in df.index.values:  # Gets the index of the row number and traverses it
         count = len(df.Description[i].split())
         if count < 30:
-            df.Description[i] = df.Description[i] + ' EOF XXX' * (20 - count)  # LV_loss: 24
+            df.Description[i] = df.Description[i] + " EOF XXX" * (
+                20 - count
+            )  # LV_loss: 24
         text[df.Image[i]] = df.Description[i]
     return text  # return dict (key: values)
 
@@ -550,7 +588,7 @@ def read_text_LV(filename):
 def get_thum(image, size=(224, 224), greyscale=False):
     image = image.resize(size, Image.ANTIALIAS)
     if greyscale:
-        image = image.convert('L')
+        image = image.convert("L")
     return image
 
 
@@ -590,7 +628,10 @@ def kl_divergence(alpha, num_classes, device):
     kl = first_term + second_term
     return kl
 
-def edl_loss(func, y, alpha, epoch_num, num_classes, annealing_step, device, useKL=True):
+
+def edl_loss(
+    func, y, alpha, epoch_num, num_classes, annealing_step, device, useKL=True
+):
     y = y.to(device)
     alpha = alpha.to(device)
     S = torch.sum(alpha, dim=1, keepdim=True)
@@ -609,16 +650,26 @@ def edl_loss(func, y, alpha, epoch_num, num_classes, annealing_step, device, use
     kl_div = annealing_coef * kl_divergence(kl_alpha, num_classes, device=device)
     return A + kl_div
 
+
 def edl_digamma_loss(alpha, target, epoch_num, num_classes, annealing_step, device):
-    loss = edl_loss(torch.digamma, target, alpha, epoch_num, num_classes, annealing_step, device)
+    loss = edl_loss(
+        torch.digamma, target, alpha, epoch_num, num_classes, annealing_step, device
+    )
     return torch.mean(loss)
 
-def get_loss(evidences, evidence_a, target, epoch_num, num_classes, annealing_step, device):  # annealing_step=50
+
+def get_loss(
+    evidences, evidence_a, target, epoch_num, num_classes, annealing_step, device
+):  # annealing_step=50
     alpha_a = evidence_a + 1
-    loss_acc = edl_digamma_loss(alpha_a, target, epoch_num, num_classes, annealing_step, device)
+    loss_acc = edl_digamma_loss(
+        alpha_a, target, epoch_num, num_classes, annealing_step, device
+    )
     for v in range(len(evidences)):
         alpha = evidences[v] + 1
-        loss_acc += edl_digamma_loss(alpha, target, epoch_num, num_classes, annealing_step, device)
+        loss_acc += edl_digamma_loss(
+            alpha, target, epoch_num, num_classes, annealing_step, device
+        )
     loss_acc = loss_acc / (len(evidences) + 1)
     loss = loss_acc
     return loss

@@ -1,0 +1,14 @@
+numpy
+scipy
+scikit-learn
+opencv-python
+Pillow
+pandas
+ml_collections
+transformers
+timm
+fairscale
+tensorboardX
+thop
+tqdm
+openpyxl
