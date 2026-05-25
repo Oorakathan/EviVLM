@@ -27,7 +27,9 @@ from transformers.modeling_outputs import (
     SequenceClassifierOutput,
     TokenClassifierOutput,
 )
-from transformers.modeling_utils import PreTrainedModel
+from transformers.modeling_utils import (
+    PreTrainedModel,
+)
 from transformers.pytorch_utils import apply_chunking_to_forward, prune_linear_layer
 from transformers.utils import logging
 from transformers.models.bert.configuration_bert import BertConfig
@@ -37,12 +39,13 @@ logger = logging.get_logger(__name__)
 
 
 def find_pruneable_heads_and_indices(heads, n_heads, head_size, already_pruned_heads):
+    """Local replacement for the helper removed from newer transformers releases."""
     mask = torch.ones(n_heads, head_size)
     heads = set(heads) - already_pruned_heads
     for head in heads:
         head = head - sum(1 if h < head else 0 for h in already_pruned_heads)
-        mask[head] = 0
-
+        for i in range(head_size):
+            mask[head, i] = 0
     mask = mask.view(-1).contiguous().eq(1)
     index = torch.arange(len(mask))[mask].long()
     return heads, index
@@ -553,6 +556,34 @@ class BertPreTrainedModel(PreTrainedModel):
     config_class = BertConfig
     base_model_prefix = "bert"
     _keys_to_ignore_on_load_missing = [r"position_ids"]
+    _tied_weights_keys = {}
+
+    @property
+    def all_tied_weights_keys(self):
+        return self._tied_weights_keys
+
+    def get_head_mask(self, head_mask, num_hidden_layers, is_attention_chunked=False):
+        """Compatibility shim for older BERT code paths.
+
+        The custom encoder expects an indexable per-layer head mask. When no mask
+        is provided, return a list of ``None`` entries. Otherwise, normalize the
+        mask to the 5D shape used by attention layers.
+        """
+        if head_mask is None:
+            return [None] * num_hidden_layers
+
+        if head_mask.dim() == 1:
+            head_mask = head_mask.unsqueeze(0).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
+            head_mask = head_mask.expand(num_hidden_layers, -1, -1, -1, -1)
+        elif head_mask.dim() == 2:
+            head_mask = head_mask.unsqueeze(1).unsqueeze(-1).unsqueeze(-1)
+        else:
+            raise ValueError(f"head_mask should be 1D or 2D, got dim={head_mask.dim()}")
+
+        if is_attention_chunked:
+            head_mask = head_mask.unsqueeze(-1)
+
+        return head_mask.to(dtype=self.dtype)
 
     def _init_weights(self, module):
         """ Initialize the weights """

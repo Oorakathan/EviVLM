@@ -1,5 +1,10 @@
-*.bin
-/datasets
-/MosMedData Chest CT Scans with COVID-19 Related Findings COVID19_1110 1.0
-/__pycache__
-/runs
+/master
+test.py
+/dataset
+/ImageEncoder_Pretrain/UNet/Pretrain_05.25_10h55/models/best_model-UNet.pth.tar
+/ImageEncoder_Pretrain/EviVLM/Pretrain_EviVLM_05.25_14h42/models/best_model-EviVLM.pth.tar
+/ImageEncoder_Pretrain/EviVLM/Pretrain_EviVLM_05.25_14h42/visualize_val
+/ImageEncoder_Pretrain/UNet/Pretrain_05.25_10h55/visualize_val
+
+/code/__pycache__
+/code/nets/__pycache__

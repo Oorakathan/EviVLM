@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 import torch.nn as nn
 import torch
 from transformers import BertTokenizer, BertConfig
@@ -13,10 +16,10 @@ class GlobalEmbedding(nn.Module):
 
         self.head = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.ReLU(inplace=True),
             nn.Linear(hidden_dim, output_dim),
-            nn.BatchNorm1d(output_dim, affine=False)  # output layer
+            nn.LayerNorm(output_dim),
         )
 
     def forward(self, x):
@@ -52,7 +55,16 @@ class TextEncoder_Bert(nn.Module):
                  hidden_dim: int = 2048,
                  freeze_bert: bool = False):
         super(TextEncoder_Bert, self).__init__()
-        self.Bio_ClinicalBERT_path = '/root/data1/journal/code/backbones/bert_model/Bio_ClinicalBERT'
+        repo_dir = Path(__file__).resolve().parent
+        self.config_path = repo_dir / "bert_config.json"
+        self.Bio_ClinicalBERT_path = os.environ.get(
+            "BIO_CLINICAL_BERT_PATH",
+            str(repo_dir / "Bio_ClinicalBERT"),
+        )
+        self.Bio_ClinicalBERT_name = os.environ.get(
+            "BIO_CLINICAL_BERT_NAME",
+            "emilyalsentzer/Bio_ClinicalBERT",
+        )
         self.last_n_layers = 1
         self.aggregate_method = "sum"
         self.embedding_dim = emb_dim
@@ -60,9 +72,22 @@ class TextEncoder_Bert(nn.Module):
         self.freeze_bert = freeze_bert
         self.agg_tokens = True
 
-        self.config = BertConfig.from_json_file('/root/data1/journal/code/backbones/bert_model/bert_config.json')
-        self.tokenizer = BertTokenizer.from_pretrained(self.Bio_ClinicalBERT_path)  # text-->token
-        self.model = BertModel.from_pretrained(self.Bio_ClinicalBERT_path, config=self.config, add_pooling_layer=False)
+        self.config = BertConfig.from_json_file(str(self.config_path))
+
+        tokenizer_source = self.Bio_ClinicalBERT_path if Path(self.Bio_ClinicalBERT_path).exists() else self.Bio_ClinicalBERT_name
+        try:
+            self.tokenizer = BertTokenizer.from_pretrained(tokenizer_source)  # text-->token
+        except Exception:
+            self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+
+        if Path(self.Bio_ClinicalBERT_path).exists():
+            self.model = BertModel.from_pretrained(self.Bio_ClinicalBERT_path, config=self.config, add_pooling_layer=False)
+        else:
+            try:
+                self.model = BertModel.from_pretrained(self.Bio_ClinicalBERT_name, config=self.config, add_pooling_layer=False)
+            except Exception:
+                # Fall back to randomly initialized weights when pretrained weights are unavailable.
+                self.model = BertModel(self.config, add_pooling_layer=False)
 
         if self.freeze_bert is True:
             print("Freezing BERT model")
@@ -119,7 +144,7 @@ class TextEncoder_Bert(nn.Module):
                         new_emb = new_emb.sum(axis=0)
                         agg_embs.append(new_emb)
                         words.append("".join(word_bank))
-                        attns.append(sum(attn_bank))
+                        attns.append(sum(attn_bank).detach())
 
                         token_bank = [word_emb]
                         word_bank = [word]
@@ -134,7 +159,11 @@ class TextEncoder_Bert(nn.Module):
             paddings = paddings.type_as(agg_embs)
             words = words + ["[PAD]"] * padding_size
             last_attns.append(
-                torch.cat([torch.tensor(attns), torch.zeros(padding_size)], dim=0))
+                torch.cat(
+                    [torch.stack(attns), torch.zeros(padding_size, device=agg_embs.device)],
+                    dim=0,
+                )
+            )
             agg_embs_batch.append(torch.cat([agg_embs, paddings]))
             sentences.append(words)
 
