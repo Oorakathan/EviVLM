@@ -8,3 +8,5 @@ test.py
 
 /code/__pycache__
 /code/nets/__pycache__
+/code/ImageEncoder_Pretrain
+__pycache__
