@@ -120,7 +120,14 @@ def main_loop(batch_size=config.batch_size, model_type='', tensorboard=True):  #
         logger.info('transformer head num: {}'.format(config_vit.transformer.num_heads))  # 4
         logger.info('transformer layers num: {}'.format(config_vit.transformer.num_layers))  # 4
         logger.info('transformer expand ratio: {}'.format(config_vit.expand_ratio))  # 4
-        model_1 = EviVLM()  # 3, 1
+        model_1 = EviVLM(
+            n_channels=config.n_channels,
+            n_classes=config.n_labels,
+            vision_backbone=config.vision_backbone,
+            segformer_model_name=config.segformer_model_name,
+            segformer_pretrained=config.segformer_pretrained,
+            freeze_segformer=config.freeze_segformer,
+        )
     else:
         raise TypeError('Please enter a valid name for the model type')
     device = torch.device(config.device)

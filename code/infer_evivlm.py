@@ -69,6 +69,13 @@ def parse_args():
         help="Optional limit on the number of samples to process.",
     )
     parser.add_argument(
+        "--vision-backbone",
+        type=str,
+        default=config.vision_backbone,
+        choices=["unet", "segformer", "segformer-b0"],
+        help="Vision backbone architecture used by the checkpoint.",
+    )
+    parser.add_argument(
         "--threshold",
         type=float,
         default=0.5,
@@ -197,8 +204,15 @@ def compose_panel(
     return panel
 
 
-def load_model(checkpoint_path: str, device: torch.device) -> EviVLM:
-    model = EviVLM(n_channels=config.n_channels, n_classes=config.n_labels).to(device)
+def load_model(checkpoint_path: str, device: torch.device, vision_backbone: str) -> EviVLM:
+    model = EviVLM(
+        n_channels=config.n_channels,
+        n_classes=config.n_labels,
+        vision_backbone=vision_backbone,
+        segformer_model_name=config.segformer_model_name,
+        segformer_pretrained=config.segformer_pretrained,
+        freeze_segformer=config.freeze_segformer,
+    ).to(device)
     checkpoint = torch.load(checkpoint_path, map_location=device)
     state_dict = checkpoint.get("state_dict", checkpoint)
     missing, unexpected = model.load_state_dict(state_dict, strict=False)
@@ -257,7 +271,7 @@ def run_inference(args):
     ensure_dir(output_dir)
 
     device = torch.device(config.device if torch.cuda.is_available() else "cpu")
-    model = load_model(checkpoint_path, device)
+    model = load_model(checkpoint_path, device, args.vision_backbone)
 
     dataset = ImageToImage2D_val(
         dataset_path,

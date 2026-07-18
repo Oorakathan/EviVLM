@@ -186,7 +186,14 @@ def main(report_excel_path=None, lambda_sim=0.1):
     )
 
     device = torch.device(config.device)
-    model = EviVLM(n_channels=config.n_channels, n_classes=config.n_labels).to(device)
+    model = EviVLM(
+        n_channels=config.n_channels,
+        n_classes=config.n_labels,
+        vision_backbone=config.vision_backbone,
+        segformer_model_name=config.segformer_model_name,
+        segformer_pretrained=config.segformer_pretrained,
+        freeze_segformer=config.freeze_segformer,
+    ).to(device)
 
     criterion = WeightedDiceBCE(dice_weight=0.5, BCE_weight=0.5)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)

@@ -37,6 +37,10 @@
 pip install -r requirements.txt
 ```
 
+- Vision backbone selection lives in `code/Config_SSL.py`:
+  - `vision_backbone = "segformer-b0"` uses `nvidia/segformer-b0-finetuned-ade-512-512` as a frozen SegFormer bottleneck projected into EviVLM.
+  - `vision_backbone = "unet"` restores the original convolutional bottleneck.
+
 - Run training (example):
 
 ```bash
@@ -48,6 +52,8 @@ python code/train_evivlm.py
 ```bash
 python code/infer_evivlm.py --checkpoint ImageEncoder_Pretrain/EviVLM/Pretrain_EviVLM_05.25_14h42/models/best_model-EviVLM.pth.tar --dataset-path D:/VLM_Medical_Imaging/dataset/Test_Folder --report-excel D:/VLM_Medical_Imaging/dataset/reports.xlsx --output-dir D:/VLM_Medical_Imaging/inference_outputs
 ```
+
+If the checkpoint was trained with the old visual path, add `--vision-backbone unet`.
 
 Notes:
 - `code/train_evivlm.py` will automatically use `d:/VLM_Medical_Imaging/dataset/reports.xlsx` if present. Otherwise it will run with empty texts (still trains segmentation only).
