@@ -6,6 +6,97 @@ from backbones.bert_model.TextEncoder import TextEncoder_Bert
 from nets.unet_blocks import ConvBatchNorm, DownBlock, NLBlock, UpBlock
 
 
+SEGFORMER_B0_MODEL_NAME = "nvidia/segformer-b0-finetuned-ade-512-512"
+
+
+class SegFormerB0Bottleneck(nn.Module):
+    """Project SegFormer-B0's final encoder stage into EviVLM's bottleneck shape."""
+
+    def __init__(
+        self,
+        model_name=SEGFORMER_B0_MODEL_NAME,
+        out_channels=512,
+        out_size=(14, 14),
+        pretrained=True,
+        freeze_encoder=False,
+    ):
+        super().__init__()
+        try:
+            from transformers import SegformerConfig, SegformerModel
+        except ImportError as exc:
+            raise ImportError(
+                "SegFormer support requires transformers. Install dependencies with "
+                "`pip install -r requirements.txt`."
+            ) from exc
+
+        if pretrained:
+            self.encoder = SegformerModel.from_pretrained(
+                model_name,
+                output_hidden_states=True,
+                ignore_mismatched_sizes=True,
+            )
+        else:
+            self.encoder = SegformerModel(
+                SegformerConfig(output_hidden_states=True)
+            )
+
+        hidden_size = self.encoder.config.hidden_sizes[-1]
+        self.out_size = out_size
+        self.freeze_encoder = freeze_encoder
+        self.project = nn.Sequential(
+            nn.Conv2d(hidden_size, out_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+        self.register_buffer(
+            "image_mean",
+            torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1),
+            persistent=False,
+        )
+        self.register_buffer(
+            "image_std",
+            torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1),
+            persistent=False,
+        )
+
+        if freeze_encoder:
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+            self.encoder.eval()
+
+    def train(self, mode=True):
+        super().train(mode)
+        if self.freeze_encoder:
+            self.encoder.eval()
+        return self
+
+    def forward(self, x):
+        x = (x - self.image_mean.type_as(x)) / self.image_std.type_as(x)
+        if self.freeze_encoder:
+            with torch.no_grad():
+                outputs = self.encoder(
+                    pixel_values=x,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+        else:
+            outputs = self.encoder(
+                pixel_values=x,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+        features = outputs.hidden_states[-1]
+        features = self.project(features)
+        if features.shape[-2:] != self.out_size:
+            features = F.interpolate(
+                features,
+                size=self.out_size,
+                mode="bilinear",
+                align_corners=False,
+            )
+        return features
+
+
 def exp_evidence(y, temp=0.8):
     return torch.exp(torch.div(torch.clamp(y, -10, 10), temp))
 
@@ -17,24 +108,40 @@ def get_p_and_u_from_logit(x):
     return p, u
 
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-
 class EviVLM(nn.Module):
-    def __init__(self, n_channels=3, n_classes=1):
+    def __init__(
+        self,
+        n_channels=3,
+        n_classes=1,
+        vision_backbone="unet",
+        segformer_model_name=SEGFORMER_B0_MODEL_NAME,
+        segformer_pretrained=True,
+        freeze_segformer=False,
+    ):
         super().__init__()
         self.device = torch.device("cuda:0")
         self.temperature = 0.07
         self.n_channels = n_channels
         self.n_classes = n_classes
+        self.vision_backbone = vision_backbone.lower()
         in_channels = 64
         self.inc = ConvBatchNorm(n_channels, in_channels)
         self.down1 = DownBlock(in_channels, in_channels * 2, nb_Conv=2)
         self.down2 = DownBlock(in_channels * 2, in_channels * 4, nb_Conv=2)
         self.down3 = DownBlock(in_channels * 4, in_channels * 8, nb_Conv=2)
         self.down4 = DownBlock(in_channels * 8, in_channels * 8, nb_Conv=2)
+        if self.vision_backbone in {"segformer", "segformer-b0"}:
+            self.segformer_bottleneck = SegFormerB0Bottleneck(
+                model_name=segformer_model_name,
+                out_channels=in_channels * 8,
+                out_size=(14, 14),
+                pretrained=segformer_pretrained,
+                freeze_encoder=freeze_segformer,
+            )
+        elif self.vision_backbone != "unet":
+            raise ValueError(
+                "vision_backbone must be one of: 'unet', 'segformer', 'segformer-b0'"
+            )
         self.up4 = UpBlock(in_channels * 16, in_channels * 4, nb_Conv=2)
         self.up3 = UpBlock(in_channels * 8, in_channels * 2, nb_Conv=2)
         self.up2 = UpBlock(in_channels * 4, in_channels, nb_Conv=2)
@@ -77,11 +184,14 @@ class EviVLM(nn.Module):
     def forward(self, x, texts):
         b = x.shape[0]
         x = x.float()
+        self.device = x.device
         x1 = self.inc(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
         x4 = self.down3(x3)
         x5 = self.down4(x4)  # [b, 512, 14, 14]
+        if self.vision_backbone in {"segformer", "segformer-b0"}:
+            x5 = self.segformer_bottleneck(x)  # [b, 512, 14, 14]
 
         report_feat, word_feat, _, sents = self.text_encoder(texts, self.device)
         report_emb = self.text_encoder.global_embed(report_feat)

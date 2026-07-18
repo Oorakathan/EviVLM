@@ -40,6 +40,14 @@ batch_size_val = 4
 model_name = "LViT"
 # model_name = 'LViT_pretrain'
 
+# Vision backbone used by EviVLM.
+# - "unet": original convolutional bottleneck.
+# - "segformer-b0": SegFormer-B0 encoder bottleneck projected into EviVLM.
+vision_backbone = "segformer-b0"
+segformer_model_name = "nvidia/segformer-b0-finetuned-ade-512-512"
+segformer_pretrained = True
+freeze_segformer = True
+
 train_dataset = "D:/VLM_Medical_Imaging/dataset/Train_Folder/"
 val_dataset = "D:/VLM_Medical_Imaging/dataset/Val_Folder/"
 session_name = "Test_session" + "_" + time.strftime("%m.%d_%Hh%M")
